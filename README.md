@@ -18,11 +18,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headle
 
 | ファイル | どこで | 何を |
 |---|---|---|
-| `cloudshell.sh` | Cloud Shell | プロジェクトと請求先を整え、予算アラートを作り、VM（e2-micro・us-west1・標準ディスク 30GB）を作って、SSH で `setup.sh` を流す |
-| `setup.sh` | VM | Node.js と obsidian-headless（版を固定）を入れ、deploy key を機械の上で作り、Obsidian にログインして Sync の写しを読むだけで取り、systemd に常駐と15分おきの突き合わせを入れる |
+| `cloudshell.sh` | Cloud Shell | プロジェクトと請求先を整え、予算アラートを作り、VM（e2-micro・us-west1・標準ディスク 30GB）を作って、SSH で `setup.sh` を段階ごとに流す。VM が作った deploy key の公開鍵を、GitHub CLI の使い捨てのログインでリポに登録する |
+| `setup.sh` | VM | Node.js と obsidian-headless（版を固定）を入れ、deploy key を機械の上で作り、Obsidian にログインして Sync の写しに読むだけで結び付ける。初めの写しは裏で取り、済んだら systemd に常駐と15分おきの突き合わせを入れる |
 | `run_shadow.sh` | VM（15分おき） | 突き合わせの結果を、非公開リポの結果だけの枝へ上げる |
 | `shadow_compare.py` | VM（15分おき） | Sync の写しと GitHub の main を、パスと中身の id で突き合わせる |
 
 ## 鍵について
 
-このリポに鍵・パスワード・トークンは入っていない。Obsidian のログインと暗号化のパスワードは、`setup.sh` の途中で本人が VM の画面に打ち、ob が VM の上に保存する。GitHub への deploy key は VM の上で作り、公開鍵だけを本人がリポの設定に登録する。
+このリポに鍵・パスワード・トークンは入っていない。Obsidian のログインと暗号化のパスワードは、`setup.sh` の途中で本人が VM の画面に打ち、ob が VM の上に保存する。GitHub への deploy key は VM の上で作り（秘密鍵は VM から出ない）、公開鍵だけを `cloudshell.sh` が登録する。そのときの GitHub CLI のログインは、本人が github.com/login/device に8文字のコードを入れて承認し、使い捨ての設定フォルダに置いて、登録が済んだら消す。

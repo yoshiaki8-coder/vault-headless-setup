@@ -3,12 +3,16 @@
 #
 # 公開の写しあり（yoshiaki8-coder/vault-headless-setup）。写しは編集禁止・正本はこのファイル
 # （my-obsidian-vault の 90_Automation（自動化スクリプト）/cloud/headless/setup.sh）。
-# 設計は docs/Obsidian_Headless_git橋_設計_2026-10-19.md。ふつうは cloudshell.sh が VM を作ってから、
-# SSH でこれを流す。手で流すときは  bash setup.sh <公開リポのコミット40桁>
+# 設計は docs/Obsidian_Headless_git橋_設計_2026-10-19.md。cloudshell.sh が VM を作ってから、SSH で
+# 段階ごとに流す:
+#   bash setup.sh <コミット> prepare … 部品を入れ、deploy key を機械の上で作る（人の手は要らない）
+#   bash setup.sh <コミット> pubkey  … deploy key の公開鍵を出す（cloudshell.sh が GitHub に登録する）
+#   bash setup.sh <コミット> keyok   … deploy key で読み書きできるかだけ見る（できれば 0）
+#   bash setup.sh <コミット> finish  … Obsidian にログインし、常駐を入れる。初めの写しは裏で取る
 #
-# このスクリプトに鍵は入っていない。鍵とパスワードは途中で本人がこの画面に打つか、機械の上で作る:
+# このスクリプトに鍵は入っていない。鍵とパスワードは本人がこの画面に打つか、機械の上で作る:
 #   - Obsidian のログイン（メール・パスワード・2段階）と暗号化のパスワード → ob が機械の上に保存
-#   - GitHub への deploy key → 機械の上で作る。公開鍵だけを GitHub のリポ設定に登録してもらう
+#   - GitHub への deploy key → 機械の上で作る。秘密鍵は機械から出ない
 #
 # 入れるもの: git・Node.js 22（版と sha256 を固定）・obsidian-headless（版を固定）・2GB のスワップ・
 # OS の自動更新・専用ユーザー vaultsync・systemd の常駐（ob sync --continuous・pull-only）と
@@ -19,6 +23,7 @@ set -euo pipefail
 REF="${1:?公開リポのコミット（40桁）を渡してください}"
 # コミットは40桁の16進だけ受け付ける（下で機械の上のコマンドと URL に埋め込むため）
 [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || { echo "コミットは40桁の16進で渡してください: $REF" >&2; exit 1; }
+PHASE="${2:?段階（prepare・pubkey・keyok・finish）を渡してください}"
 RAW="https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/$REF"
 NODE_VERSION=22.23.3
 NODE_SHA256=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
@@ -26,13 +31,32 @@ OB_VERSION=0.0.14
 SVC_USER=vaultsync
 SVC_HOME="/home/$SVC_USER"
 REPO_SSH="git@github.com:yoshiaki8-coder/my-obsidian-vault.git"
-DEPLOY_KEY_PAGE="https://github.com/yoshiaki8-coder/my-obsidian-vault/settings/keys/new"
 SYNC_VAULT="${SYNC_VAULT:-yoshi88_main}"
 DEVICE_NAME="${DEVICE_NAME:-headless-gcp}"
 FILE_TYPES="image,audio,video,pdf,unsupported"
 
 step() { printf '\n【%s】%s\n' "$1" "$2"; }
 as_svc() { sudo -u "$SVC_USER" -H "$@"; }
+
+# 読めるか（ls-remote）と、書けるか（--dry-run の push。読むだけの鍵ならここで断られる）を見る
+key_ok() {
+  as_svc bash -c '
+    set -e
+    git ls-remote "$1" HEAD >/dev/null
+    d=$(mktemp -d); cd "$d"; git init -q
+    git -c user.name=probe -c user.email=probe@example.invalid commit -q --allow-empty -m probe
+    git push -q --dry-run "$1" HEAD:refs/heads/headless-shadow-probe
+    cd /; rm -rf "$d"' _ "$REPO_SSH" >/dev/null 2>&1
+}
+
+case "$PHASE" in
+  pubkey) sudo cat "$SVC_HOME/.ssh/vault_deploy.pub"; exit 0 ;;
+  keyok) key_ok; exit $? ;;
+  prepare|finish) ;;
+  *) echo "段階は prepare・pubkey・keyok・finish のどれか: $PHASE" >&2; exit 1 ;;
+esac
+
+if [ "$PHASE" = "prepare" ]; then
 
 step 1/9 "OS の部品と自動更新"
 sudo apt-get update -q
@@ -73,7 +97,7 @@ for f in shadow_compare.py run_shadow.sh; do
 done
 as_svc chmod 700 "$SVC_HOME/.ssh"
 
-step 6/9 "GitHub への deploy key（この機械の上で作る）"
+step 6/9 "GitHub への deploy key（この機械の上で作る・秘密鍵は機械から出ない）"
 if [ ! -f "$SVC_HOME/.ssh/vault_deploy" ]; then
   as_svc ssh-keygen -q -t ed25519 -N "" -C "$DEVICE_NAME vault deploy key" -f "$SVC_HOME/.ssh/vault_deploy"
 fi
@@ -83,39 +107,53 @@ curl -fsSL https://api.github.com/meta \
   | as_svc tee "$SVC_HOME/.ssh/known_hosts" >/dev/null
 printf 'Host github.com\n  IdentityFile ~/.ssh/vault_deploy\n  IdentitiesOnly yes\n' \
   | as_svc tee "$SVC_HOME/.ssh/config" >/dev/null
-# 読めるか（ls-remote）と、書けるか（--dry-run の push。読むだけの鍵ならここで断られる）を見る
-key_ok() {
-  as_svc bash -c '
-    set -e
-    git ls-remote "$1" HEAD >/dev/null
-    d=$(mktemp -d); cd "$d"; git init -q
-    git -c user.name=probe -c user.email=probe@example.invalid commit -q --allow-empty -m probe
-    git push -q --dry-run "$1" HEAD:refs/heads/headless-shadow-probe
-    cd /; rm -rf "$d"' _ "$REPO_SSH" >/dev/null 2>&1
-}
-until key_ok; do
-  echo
-  echo "次の公開鍵を GitHub に登録してください（鍵の中身は公開してよいものです）:"
-  echo
-  cat "$SVC_HOME/.ssh/vault_deploy.pub"
-  echo
-  echo "  1. このページを開く: $DEPLOY_KEY_PAGE"
-  echo "  2. Title は何でもよい。Key に上の1行を貼り、「Allow write access」にチェックを入れて Add key"
-  echo "  3. 登録したら、ここで Enter"
-  read -r _
-done
-echo "deploy key で読み書きできました。"
+echo
+echo "部品を入れ終わりました。"
+exit 0
+fi
 
-step 7/9 "Vault の目録だけを取る（中身は落とさない clone）"
+# ここから finish
+step 7/9 "deploy key で読み書きできるか（GitHub への登録を待つ）"
+for _ in $(seq 1 60); do
+  key_ok && break
+  sleep 10
+done
+key_ok || { echo "deploy key で読み書きできません。GitHub のリポ設定 → Deploy keys を見てください。" >&2; exit 1; }
+echo "読み書きできました。"
+
+echo "Vault の目録だけを取ります（中身は落とさない clone）。"
 if [ ! -d "$SVC_HOME/vault-git/.git" ]; then
   as_svc git clone -q --filter=blob:none --no-checkout --single-branch --branch main "$REPO_SSH" "$SVC_HOME/vault-git"
 fi
 
-step 8/9 "Obsidian にログインし、Sync の写しを取る（読むだけ・pull-only）"
+step 8/9 "Obsidian にログインし、Sync の写しに結び付ける（読むだけ・pull-only）"
 echo "Obsidian のメール・パスワード・2段階認証のコードを聞かれます。この画面に直接打ってください。"
 as_svc ob login
-as_svc ob sync-list-remote
-echo "結び付ける Sync の Vault: $SYNC_VAULT（違うときは Ctrl+C で止めて SYNC_VAULT=名前 を付けて流し直す）"
+# 結び付ける Sync の Vault を決める: SYNC_VAULT の名前があればそれ、Vault が1つだけならそれ、ほかは聞く
+names=$(as_svc ob sync-list-remote --json 2>/dev/null | python3 -c '
+import json, sys
+def walk(x):
+    if isinstance(x, dict):
+        if isinstance(x.get("name"), str):
+            yield x["name"]
+        for v in x.values():
+            yield from walk(v)
+    elif isinstance(x, list):
+        for v in x:
+            yield from walk(v)
+try:
+    print("\n".join(dict.fromkeys(walk(json.load(sys.stdin)))))
+except ValueError:
+    pass' || true)
+if ! printf '%s\n' "$names" | grep -qxF "$SYNC_VAULT"; then
+  if [ -n "$names" ] && [ "$(printf '%s\n' "$names" | wc -l)" -eq 1 ]; then
+    SYNC_VAULT="$names"
+  else
+    as_svc ob sync-list-remote
+    read -r -p "結び付ける Sync の Vault の名前を入れてください: " SYNC_VAULT
+  fi
+fi
+echo "結び付ける Sync の Vault: $SYNC_VAULT"
 # 結び付けた印は Sync の写しの外に置く（写しの中に置くと、切り替え後に Sync へ上がってしまう）
 LINKED="$SVC_HOME/.local/state/headless/linked"
 if [ ! -f "$LINKED" ]; then
@@ -125,10 +163,32 @@ if [ ! -f "$LINKED" ]; then
   as_svc touch "$LINKED"
 fi
 as_svc ob sync-config --path "$SVC_HOME/vault-sync" --mode pull-only --configs "" --file-types "$FILE_TYPES"
-echo "初めの写しを取っています（2GB ほど・数分〜数十分）。"
-as_svc ob sync --path "$SVC_HOME/vault-sync"
 
-step 9/9 "常駐と15分おきの突き合わせ"
+step 9/9 "常駐と15分おきの突き合わせ（初めの写しは裏で取る）"
+sudo tee /usr/local/sbin/vault-headless-first-sync >/dev/null <<EOF
+#!/bin/bash
+# 初めの写し（2GB ほど）を取り切ってから、常駐と15分おきの突き合わせを入れる。済んだら自分を外す。
+set -euo pipefail
+sudo -u $SVC_USER -H /usr/local/bin/ob sync --path $SVC_HOME/vault-sync
+systemctl enable --now vault-headless-sync.service vault-headless-shadow.timer
+systemctl disable vault-headless-first-sync.service
+EOF
+sudo chmod 755 /usr/local/sbin/vault-headless-first-sync
+sudo tee /etc/systemd/system/vault-headless-first-sync.service >/dev/null <<EOF
+[Unit]
+Description=初めの写しを取り、常駐を入れる（1回だけ）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vault-headless-first-sync
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
+EOF
 sudo tee /etc/systemd/system/vault-headless-sync.service >/dev/null <<EOF
 [Unit]
 Description=Obsidian Headless の写し（影運転・pull-only）
@@ -168,8 +228,13 @@ OnUnitActiveSec=15min
 WantedBy=timers.target
 EOF
 sudo systemctl daemon-reload
-sudo systemctl enable --now vault-headless-sync.service vault-headless-shadow.timer
-sudo systemctl start vault-headless-shadow.service
-cat "$SVC_HOME/shadow-report/report.md"
+if systemctl is-enabled --quiet vault-headless-sync.service 2>/dev/null; then
+  sudo systemctl restart vault-headless-sync.service
+else
+  sudo systemctl enable vault-headless-first-sync.service
+  sudo systemctl start --no-block vault-headless-first-sync.service
+fi
 echo
-echo "終わりました。突き合わせの結果は15分おきに my-obsidian-vault の headless-shadow ブランチへ上がります。"
+echo "終わりました。この画面は閉じてかまいません。"
+echo "初めの写し（2GB ほど）は機械が裏で取り、済んだら15分おきの突き合わせが始まります。"
+echo "結果は my-obsidian-vault の headless-shadow ブランチへ上がります。"
