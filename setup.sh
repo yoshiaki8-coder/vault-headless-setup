@@ -149,8 +149,17 @@ if ! printf '%s\n' "$names" | grep -qxF "$SYNC_VAULT"; then
   if [ -n "$names" ] && [ "$(printf '%s\n' "$names" | wc -l)" -eq 1 ]; then
     SYNC_VAULT="$names"
   else
-    as_svc ob sync-list-remote
-    read -r -p "結び付ける Sync の Vault の名前を入れてください: " SYNC_VAULT
+    listing="$(as_svc ob sync-list-remote 2>/dev/null || true)"
+    printf '%s\n' "$listing"
+    # 入れた名前は、Sync の一覧にあるものだけ受け付ける
+    while :; do
+      read -r -p "結び付ける Sync の Vault の名前を入れてください: " SYNC_VAULT
+      if [ -n "$SYNC_VAULT" ] && { printf '%s\n' "$names" | grep -qxF -- "$SYNC_VAULT" \
+           || { [ -z "$names" ] && grep -qF -- "$SYNC_VAULT" <<<"$listing"; }; }; then
+        break
+      fi
+      echo "一覧にない名前です。上の一覧から、もう一度入れてください。"
+    done
   fi
 fi
 echo "結び付ける Sync の Vault: $SYNC_VAULT"
