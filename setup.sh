@@ -17,6 +17,8 @@
 set -euo pipefail
 
 REF="${1:?公開リポのコミット（40桁）を渡してください}"
+# コミットは40桁の16進だけ受け付ける（下で機械の上のコマンドと URL に埋め込むため）
+[[ "$REF" =~ ^[0-9a-f]{40}$ ]] || { echo "コミットは40桁の16進で渡してください: $REF" >&2; exit 1; }
 RAW="https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/$REF"
 NODE_VERSION=22.23.3
 NODE_SHA256=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
