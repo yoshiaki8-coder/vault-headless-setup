@@ -65,13 +65,17 @@ printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgr
   | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null
 
 step 2/9 "スワップ 2GB（メモリが1GBしかないため）"
-if ! swapon --show | grep -q /swapfile; then
-  sudo fallocate -l 2G /swapfile
-  sudo chmod 600 /swapfile
-  sudo mkswap /swapfile >/dev/null
+# 使っているかは /proc/swaps で見る（swapon は /usr/sbin にあり、普通のユーザーの PATH では見つからない。
+# 見つからないまま「無い」と読むと、使用中の /swapfile を作り直そうとして止まる・2026-10-23 の2回目で実際に起きた）
+if ! grep -q '^/swapfile ' /proc/swaps; then
+  if [ ! -f /swapfile ]; then
+    sudo fallocate -l 2G /swapfile
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile >/dev/null
+  fi
   sudo swapon /swapfile
-  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
 fi
+grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
 
 step 3/9 "Node.js $NODE_VERSION"
 if [ "$(/opt/node/bin/node --version 2>/dev/null)" != "v$NODE_VERSION" ]; then
