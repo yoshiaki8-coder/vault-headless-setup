@@ -27,15 +27,13 @@ VAULT_REPO="yoshiaki8-coder/my-obsidian-vault"
 GH_VERSION=2.89.0
 GH_SHA256=d0422caade520530e76c1c558da47daebaa8e1203d6b7ff10ad7d6faba3490d8
 
-project="$(gcloud config get-value project 2>/dev/null || true)"
-if [ -z "$project" ] || [ "$project" = "(unset)" ]; then
-  project="$(gcloud projects list --format='value(projectId)' --limit=1)"
-  if [ -z "$project" ]; then
-    project="vault-headless-$(date +%y%m%d%H%M)"
-    gcloud projects create "$project" --name="vault-headless"
-  fi
-  gcloud config set project "$project"
+# 常時機は専用のプロジェクトに置く（ほかの用途、たとえば Gemini API のプロジェクトと請求を混ぜない）
+project="$(gcloud projects list --filter='name=vault-headless' --format='value(projectId)' --limit=1)"
+if [ -z "$project" ]; then
+  project="vault-headless-$(date +%y%m%d%H%M)"
+  gcloud projects create "$project" --name="vault-headless"
 fi
+gcloud config set project "$project"
 echo "プロジェクト: $project"
 
 billing="$(gcloud billing accounts list --filter=open=true --format='value(name)' --limit=1)"
@@ -53,7 +51,10 @@ gcloud services enable compute.googleapis.com
 if gcloud services enable billingbudgets.googleapis.com >/dev/null 2>&1 \
    && ! gcloud billing budgets list --billing-account="$billing" --format='value(displayName)' 2>/dev/null \
         | grep -qxF "vault-headless の見張り"; then
+  # 予算はこのプロジェクトの分だけを見る（請求先アカウント全体だと、ほかの用途の分で鳴ってしまう）
+  pnum="$(gcloud projects describe "$project" --format='value(projectNumber)')"
   gcloud billing budgets create --billing-account="$billing" --display-name="vault-headless の見張り" \
+    --filter-projects="projects/$pnum" \
     --budget-amount=100JPY --threshold-rule=percent=0.5 --threshold-rule=percent=1.0 >/dev/null 2>&1 \
     && echo "予算アラート（100円）を作りました。超えそうになるとメールが来ます。" \
     || echo "予算アラートは作れませんでした（請求の画面から作れます）。先へ進みます。"
