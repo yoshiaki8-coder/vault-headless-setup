@@ -9,6 +9,8 @@
 #   bash setup.sh <コミット> pubkey  … deploy key の公開鍵を出す（cloudshell.sh が GitHub に登録する）
 #   bash setup.sh <コミット> keyok   … deploy key で読み書きできるかだけ見る（できれば 0）
 #   bash setup.sh <コミット> finish  … Obsidian にログインし、常駐を入れる。初めの写しは裏で取る
+#   bash setup.sh <コミット> doctor  … 様子を GitHub の headless-status ブランチへ上げる仕組みを入れ、
+#                                      止まった初めの写しを動かし直す（ログインは要らない）
 #
 # このスクリプトに鍵は入っていない。鍵とパスワードは本人がこの画面に打つか、機械の上で作る:
 #   - Obsidian のログイン（メール・パスワード・2段階）と暗号化のパスワード → ob が機械の上に保存
@@ -16,14 +18,15 @@
 #
 # 入れるもの: git・Node.js 22（版と sha256 を固定）・obsidian-headless（版を固定）・2GB のスワップ・
 # OS の自動更新・専用ユーザー vaultsync・systemd の常駐（ob sync --continuous・pull-only）と
-# 15分おきの突き合わせ（run_shadow.sh）。影運転のあいだは main にも Sync にも書かない。
+# 15分おきの突き合わせ（run_shadow.sh）と、30分おきに様子を上げる仕組み（status_report.sh）。
+# 影運転のあいだは main にも Sync にも書かない。
 
 set -euo pipefail
 
 REF="${1:?公開リポのコミット（40桁）を渡してください}"
 # コミットは40桁の16進だけ受け付ける（下で機械の上のコマンドと URL に埋め込むため）
 [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || { echo "コミットは40桁の16進で渡してください: $REF" >&2; exit 1; }
-PHASE="${2:?段階（prepare・pubkey・keyok・finish）を渡してください}"
+PHASE="${2:?段階（prepare・pubkey・keyok・finish・doctor）を渡してください}"
 RAW="https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/$REF"
 NODE_VERSION=22.23.3
 NODE_SHA256=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
@@ -49,12 +52,75 @@ key_ok() {
     cd /; rm -rf "$d"' _ "$REPO_SSH" >/dev/null 2>&1
 }
 
+# 様子を GitHub に上げる仕組み（root で30分おき）。初めの写しが終わる前から動かす。
+# 上げ先は headless-status ブランチ（status.md 1枚）。入れるだけで、動かし始めるのは呼ぶ側
+install_status() {
+  curl -fsSL "$RAW/status_report.sh" | sudo tee /usr/local/sbin/vault-headless-status >/dev/null
+  sudo chmod 755 /usr/local/sbin/vault-headless-status
+  sudo tee /etc/systemd/system/vault-headless-status.service >/dev/null <<EOF
+[Unit]
+Description=常時機の様子を GitHub に上げる
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+TimeoutStartSec=5min
+ExecStart=/bin/bash /usr/local/sbin/vault-headless-status
+EOF
+  sudo tee /etc/systemd/system/vault-headless-status.timer >/dev/null <<EOF
+[Unit]
+Description=30分おきに常時機の様子を上げる
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target
+EOF
+  sudo systemctl daemon-reload
+}
+
 case "$PHASE" in
   pubkey) sudo cat "$SVC_HOME/.ssh/vault_deploy.pub"; exit 0 ;;
   keyok) key_ok; exit $? ;;
-  prepare|finish) ;;
-  *) echo "段階は prepare・pubkey・keyok・finish のどれか: $PHASE" >&2; exit 1 ;;
+  prepare|finish|doctor) ;;
+  *) echo "段階は prepare・pubkey・keyok・finish・doctor のどれか: $PHASE" >&2; exit 1 ;;
 esac
+
+if [ "$PHASE" = "doctor" ]; then
+
+step 1/2 "様子を GitHub に上げる仕組み（30分おき）"
+install_status
+sudo env FORCE_PUSH=1 bash /usr/local/sbin/vault-headless-status \
+  && echo "様子を my-obsidian-vault の headless-status ブランチへ上げました。" \
+  || echo "様子を GitHub に上げられませんでした。下の画面をそのまま送ってください。"
+sudo systemctl enable --now vault-headless-status.timer
+echo
+sudo cat "$SVC_HOME/status-report/status.md"
+
+step 2/2 "止まっている初めの写しを動かし直す"
+if systemctl is-enabled --quiet vault-headless-sync.service 2>/dev/null; then
+  echo "初めの写しは済んでいます（常駐が入っています）。"
+  systemctl is-active --quiet vault-headless-sync.service || sudo systemctl restart vault-headless-sync.service
+elif [ -f /etc/systemd/system/vault-headless-first-sync.service ]; then
+  state="$(systemctl show -p ActiveState --value vault-headless-first-sync.service)"
+  if [ "$state" = "activating" ] || [ "$state" = "active" ]; then
+    echo "初めの写しはまだ取っている途中です。そのまま待ちます。"
+  else
+    echo "初めの写しが止まっていた（$state）ので、動かし直します。"
+    sudo systemctl enable vault-headless-first-sync.service
+    sudo systemctl restart --no-block vault-headless-first-sync.service
+  fi
+else
+  echo "初めの写しの仕組みがまだ入っていません。README の設定の1行を流してください。"
+fi
+echo
+echo "終わりました。この画面は閉じてかまいません。様子はこれから30分おきに GitHub へ上がります。"
+exit 0
+fi
 
 if [ "$PHASE" = "prepare" ]; then
 
@@ -241,6 +307,8 @@ OnUnitActiveSec=15min
 WantedBy=timers.target
 EOF
 sudo systemctl daemon-reload
+install_status
+sudo systemctl enable --now vault-headless-status.timer
 if systemctl is-enabled --quiet vault-headless-sync.service 2>/dev/null; then
   sudo systemctl restart vault-headless-sync.service
 else
@@ -250,4 +318,4 @@ fi
 echo
 echo "終わりました。この画面は閉じてかまいません。"
 echo "初めの写し（2GB ほど）は機械が裏で取り、済んだら15分おきの突き合わせが始まります。"
-echo "結果は my-obsidian-vault の headless-shadow ブランチへ上がります。"
+echo "結果は my-obsidian-vault の headless-shadow ブランチへ、様子は headless-status ブランチへ上がります。"

@@ -2,7 +2,7 @@
 
 Obsidian Headless（Obsidian 社のコマンド版の Sync）を、Google Cloud の小さな VM（e2-micro）に入れるためのスクリプト。
 
-写し・編集禁止。正本は非公開のリポ（my-obsidian-vault の `90_Automation（自動化スクリプト）/cloud/headless/`）にあり、ここには鍵を含まない4本だけを同じ中身で置いている。
+写し・編集禁止。正本は非公開のリポ（my-obsidian-vault の `90_Automation（自動化スクリプト）/cloud/headless/`）にあり、ここには鍵を含まない5本だけを同じ中身で置いている。
 
 ## 流し方
 
@@ -10,6 +10,12 @@ Google Cloud Shell（https://shell.cloud.google.com/?show=terminal ）に1行貼
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/<コミット>/cloudshell.sh) <コミット>
+```
+
+様子を見る・止まった初めの写しを動かし直すだけなら、最後に `doctor` を付ける（ログインは要らない）。
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/<コミット>/cloudshell.sh) <コミット> doctor
 ```
 
 コミットで固定した URL から取るので、あとからこのリポを変えても、流す中身は変わらない。
@@ -22,6 +28,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headle
 | `setup.sh` | VM | Node.js と obsidian-headless（版を固定）を入れ、deploy key を機械の上で作り、Obsidian にログインして Sync の写しに読むだけで結び付ける。初めの写しは裏で取り、済んだら systemd に常駐と15分おきの突き合わせを入れる |
 | `run_shadow.sh` | VM（15分おき） | 突き合わせの結果を、非公開リポの結果だけの枝へ上げる |
 | `shadow_compare.py` | VM（15分おき） | Sync の写しと GitHub の main を、パスと中身の id で突き合わせる |
+| `status_report.sh` | VM（30分おき） | 機械の様子（常駐の状態・写しの大きさ・記録の末尾）を、非公開リポの様子だけの枝へ上げる |
 
 ## 鍵について
 
