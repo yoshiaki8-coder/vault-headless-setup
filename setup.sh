@@ -168,7 +168,9 @@ done
 as_svc chmod 700 "$SVC_HOME/.ssh"
 
 step 6/9 "GitHub への deploy key（この機械の上で作る・秘密鍵は機械から出ない）"
-if [ ! -f "$SVC_HOME/.ssh/vault_deploy" ]; then
+# 有無は sudo で見る（~/.ssh は 700 で、流している人の権限では覗けない。覗けないまま「無い」と読むと
+# 鍵を作り直そうとして上書きを聞かれ、GitHub への登録がやり直しになる・2026-10-23 と 10-24 に実際に起きた）
+if ! sudo test -f "$SVC_HOME/.ssh/vault_deploy"; then
   as_svc ssh-keygen -q -t ed25519 -N "" -C "$DEVICE_NAME vault deploy key" -f "$SVC_HOME/.ssh/vault_deploy"
 fi
 # GitHub のホスト鍵は HTTPS の api.github.com/meta から取る（初回接続で知らない鍵を信じない）
