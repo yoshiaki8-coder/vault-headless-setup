@@ -18,6 +18,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headle
 bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/<コミット>/cloudshell.sh) <コミット> doctor
 ```
 
+iPhone など、Cloud Shell の画面に貼り付けができないときは、次のリンクを開く。このリポを取り込んだ Cloud Shell が開くので、`bash doctor` と打つ（中身は上の doctor の1行と同じ）。
+
+https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fyoshiaki8-coder%2Fvault-headless-setup&cloudshell_git_branch=main&show=terminal
+
 コミットで固定した URL から取るので、あとからこのリポを変えても、流す中身は変わらない。
 
 ## 何をするか
