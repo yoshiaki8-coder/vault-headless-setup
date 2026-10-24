@@ -1,7 +1,0 @@
-#!/bin/bash
-# iPhone の Cloud Shell で貼り付けができないとき用の短い入口。打つのは `bash doctor` だけ。
-# 写し・編集禁止。正本は my-obsidian-vault の 90_Automation（自動化スクリプト）/cloud/headless/doctor
-# 中身は README の doctor の1行と同じ（コミットで固定した cloudshell.sh を doctor で流す。ログインは要らない）。
-set -euo pipefail
-REF=2f3ce96d33b350a77f7aee7175f653090ba3ad38
-bash <(curl -fsSL "https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/$REF/cloudshell.sh") "$REF" doctor
