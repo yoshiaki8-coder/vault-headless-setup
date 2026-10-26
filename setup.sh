@@ -237,11 +237,20 @@ fi
 echo "結び付ける Sync の Vault: $SYNC_VAULT"
 # 結び付けた印は Sync の写しの外に置く（写しの中に置くと、切り替え後に Sync へ上がってしまう）
 LINKED="$SVC_HOME/.local/state/headless/linked"
-if [ ! -f "$LINKED" ]; then
+# 印の有無も sudo で見る（vaultsync の家は流している人の権限では覗けないことがある）
+if ! sudo test -f "$LINKED"; then
   echo "エンドツーエンド暗号化の Vault なら、暗号化のパスワードを聞かれます。"
-  as_svc ob sync-setup --vault "$SYNC_VAULT" --path "$SVC_HOME/vault-sync" --device-name "$DEVICE_NAME"
-  as_svc mkdir -p "$(dirname "$LINKED")"
-  as_svc touch "$LINKED"
+  echo "（Obsidian のアカウントのパスワードとは別。Sync の Vault を作ったときに決めたもの）"
+  # 打ち間違えても最初から流し直さずに済むよう、3回まで打ち直せる（2026-10-26 本人が1回目で弾かれた）
+  for try in 1 2 3; do
+    if as_svc ob sync-setup --vault "$SYNC_VAULT" --path "$SVC_HOME/vault-sync" --device-name "$DEVICE_NAME"; then
+      as_svc mkdir -p "$(dirname "$LINKED")"
+      as_svc touch "$LINKED"
+      break
+    fi
+    echo "結び付けられませんでした（暗号化のパスワードが違う、など）。もう一度打ってください（$try/3）。"
+  done
+  sudo test -f "$LINKED" || { echo "3回とも結び付けられませんでした。暗号化のパスワードを確かめてから、同じ1行を流し直してください。" >&2; exit 1; }
 fi
 as_svc ob sync-config --path "$SVC_HOME/vault-sync" --mode pull-only --configs "" --file-types "$FILE_TYPES"
 
