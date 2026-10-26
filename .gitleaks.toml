@@ -1,0 +1,45 @@
+# gitleaks 設定（拡張・標準）
+# useDefault(広い既定ルール) + 内容4種 + 秘密ファイル名ブロック。
+# repo_security_auditor.py が全リポへ配布する単一の標準設定。
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "gemini-google-api-key"
+description = "Google/Gemini API キー (AIzaSy...)"
+regex = '''AIzaSy[A-Za-z0-9_-]{28,}'''
+
+[[rules]]
+id = "anthropic-api-key-vault"
+description = "Anthropic API キー (sk-ant-api...)"
+regex = '''sk-ant-api[A-Za-z0-9_-]{20,}'''
+
+[[rules]]
+id = "openai-project-key-vault"
+description = "OpenAI プロジェクトキー (sk-proj-...)"
+regex = '''sk-proj-[A-Za-z0-9_-]{20,}'''
+
+[[rules]]
+id = "google-oauth-client-secret"
+description = "Google OAuth クライアントシークレット (GOCSPX-...)"
+regex = '''GOCSPX-[A-Za-z0-9_-]{10,}'''
+
+[[rules]]
+id = "secret-filename"
+description = "秘密を含みがちなファイル名(.env/*token*.json/credentials/client_secret/service_account/*.pem/SSH秘密鍵)"
+path = '''(^|/)(\.env(\.[^/]+)?|[^/]*token[^/]*\.json|credentials[^/]*\.json|client_secret[^/]*\.json|service_account[^/]*\.json|[^/]*\.pem|id_(rsa|ed25519|dsa|ecdsa))$'''
+
+[allowlist]
+description = "既知の誤検知・サンプル・設定ファイル自身"
+paths = [
+  '''\.gitleaks\.toml''',
+  '''\.example$''',
+  '''package-lock\.json''',
+  '''poetry\.lock''',
+]
+regexes = [
+  '''(?i)your[-_ ]?(api[-_ ]?key|token|secret)[-_ ]?here''',
+  '''(?i)dummy''',
+  '''(?i)placeholder''',
+]
