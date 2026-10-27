@@ -15,8 +15,11 @@ SVC_HOME="/home/$SVC_USER"
 REPO="${HEADLESS_REPO:-git@github.com:yoshiaki8-coder/my-obsidian-vault.git}"
 WORK="$SVC_HOME/status-report"
 STATE="$SVC_HOME/.local/state/headless/status_pushed"
-UNITS="vault-headless-first-sync.service vault-headless-sync.service vault-headless-shadow.service vault-headless-shadow.timer vault-headless-status.timer"
+UNITS="vault-headless-first-sync.service vault-headless-sync.service vault-headless-shadow.service vault-headless-shadow.timer vault-headless-status.timer vault-minutes.service vault-minutes.timer"
 HEARTBEAT_SECONDS=3600
+MIN_CO="$SVC_HOME/minutes-git"
+MIN_STATE="$SVC_HOME/.local/state/headless"
+AGE_KEY="$SVC_HOME/.config/headless/age.key"
 
 as_svc() { sudo -u "$SVC_USER" -H "$@"; }
 
@@ -25,6 +28,36 @@ units() {
     printf '%s enabled=%s %s\n' "$u" "$(systemctl is-enabled "$u" 2>/dev/null)" \
       "$(systemctl show -p ActiveState -p SubState -p Result -p NRestarts -p ExecMainStatus "$u" 2>/dev/null | tr '\n' ' ')"
   done
+}
+
+# 議事録の周回（setup.sh の minutes の段で入る）。鍵は名前だけ出し、中身は出さない
+minutes_flag() {
+  as_svc python3 "$MIN_CO/90_Automation（自動化スクリプト）/switch.py" minutes --local 2>/dev/null || echo 読めない
+}
+
+minutes_keys() {
+  local have=() pair
+  for pair in "$MIN_CO/.secrets/gemini_api_key.txt:Gemini" "$SVC_HOME/.plaud/tokens.json:Plaud" \
+              "$MIN_CO/90_Automation（自動化スクリプト）/.calendar_token.json:カレンダー" \
+              "$MIN_CO/.secrets/slack_bot_token.txt:Slack" "$MIN_CO/.secrets/slack_webhook_url.txt:Slackの webhook"; do
+    [ -s "${pair%:*}" ] && have+=("${pair##*:}")
+  done
+  echo "${have[*]:-まだ無い}"
+}
+
+minutes_section() {
+  echo "## 議事録の周回"
+  echo
+  if [ ! -f /etc/systemd/system/vault-minutes.timer ]; then
+    echo "- まだ入っていません（Cloud Shell の minutes の1行で入る）"
+    return
+  fi
+  echo "- 旗 minutes（常時機の写し）: $(minutes_flag)"
+  echo "- 最後の周回: $(cat "$MIN_STATE/minutes_last.txt" 2>/dev/null || echo まだ)"
+  echo "- 鍵の受け取り: $(cat "$MIN_STATE/keys_received.txt" 2>/dev/null || echo まだ)"
+  echo "- 置いてある鍵（名前だけ）: $(minutes_keys)"
+  # Mac の「常時機へ議事録の鍵を送る.command」がこの行から公開鍵を読む
+  echo "- 鍵の受け取り口: $(age-keygen -y "$AGE_KEY" 2>/dev/null || echo まだ)"
 }
 
 body() {
@@ -37,6 +70,8 @@ body() {
   echo "- Sync への結び付け: $([ -f "$SVC_HOME/.local/state/headless/linked" ] && echo 済み || echo まだ)"
   echo "- ob $(ob --version 2>/dev/null || echo 不明)・node $(node --version 2>/dev/null || echo 不明)"
   echo
+  minutes_section
+  echo
   echo "## 常駐"
   echo
   echo '```'
@@ -48,7 +83,7 @@ body() {
   echo '```'
   as_svc timeout 60 ob sync-status --path "$SVC_HOME/vault-sync" 2>&1 | tail -n 20
   echo '```'
-  for u in vault-headless-first-sync vault-headless-sync vault-headless-shadow; do
+  for u in vault-headless-first-sync vault-headless-sync vault-headless-shadow vault-minutes; do
     echo
     echo "## 記録の末尾: $u"
     echo
@@ -69,7 +104,8 @@ chown "$SVC_USER:$SVC_USER" "$WORK" "$(dirname "$STATE")"
 body > "$WORK/status.md"
 chown "$SVC_USER:$SVC_USER" "$WORK/status.md"
 
-key="$(units | sha256sum | cut -c1-16)"
+# 常駐の状態に加え、旗と鍵の受け取りが変わったときも上げる（鍵を送った人が30分以内に結果を読めるように）
+key="$( { units; minutes_flag; cat "$MIN_STATE/keys_received.txt" 2>/dev/null; } | sha256sum | cut -c1-16)"
 last_key=""; last_at=0
 [ -f "$STATE" ] && read -r last_key last_at < "$STATE"
 now=$(date +%s)

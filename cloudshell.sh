@@ -9,6 +9,8 @@
 #   bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/<コミット>/cloudshell.sh) <コミット>
 # 様子を見る・止まった写しを動かし直すだけなら、最後に doctor を付ける（ログインは要らない）:
 #   bash <(curl -fsSL .../<コミット>/cloudshell.sh) <コミット> doctor
+# 議事録の周回（PLAUD の取り込みと議事録づくり）を入れるなら、最後に minutes を付ける（ログインは要らない）:
+#   bash <(curl -fsSL .../<コミット>/cloudshell.sh) <コミット> minutes
 #
 # 無料枠に収めるための形: e2-micro 1台・us-west1・標準の永続ディスク 30GB・Spot にしない。
 # 外部 IPv4 は Obsidian Sync と GitHub へ出るのに要る（エフェメラル）。料金が出ないかは
@@ -23,7 +25,7 @@ REF="${1:?公開リポのコミット（40桁）を渡してください}"
 # コミットは40桁の16進だけ受け付ける（下で機械の上のコマンドと URL に埋め込むため）
 [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || { echo "コミットは40桁の16進で渡してください: $REF" >&2; exit 1; }
 MODE="${2:-setup}"
-[[ "$MODE" =~ ^(setup|doctor)$ ]] || { echo "2つ目は doctor だけ受け付けます: $MODE" >&2; exit 1; }
+[[ "$MODE" =~ ^(setup|doctor|minutes)$ ]] || { echo "2つ目は doctor か minutes だけ受け付けます: $MODE" >&2; exit 1; }
 RAW="https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/$REF"
 NAME="${NAME:-vault-headless}"
 ZONE="${ZONE:-us-west1-b}"
@@ -33,7 +35,7 @@ GH_SHA256=d0422caade520530e76c1c558da47daebaa8e1203d6b7ff10ad7d6faba3490d8
 
 # 常時機は専用のプロジェクトに置く（ほかの用途、たとえば Gemini API のプロジェクトと請求を混ぜない）
 project="$(gcloud projects list --filter='name=vault-headless' --format='value(projectId)' --limit=1)"
-if [ -z "$project" ] && [ "$MODE" = "doctor" ]; then
+if [ -z "$project" ] && [ "$MODE" != "setup" ]; then
   echo "常時機のプロジェクト（vault-headless）が見つかりません。設定の1行（doctor なし）を流してください。" >&2
   exit 1
 fi
@@ -46,9 +48,13 @@ echo "プロジェクト: $project"
 
 remote() { gcloud compute ssh "$NAME" --zone "$ZONE" --quiet -- "$@"; }
 
-if [ "$MODE" = "doctor" ]; then
-  echo "常時機の様子を見て、様子を GitHub に上げる仕組みを入れます（ログインは要りません）。"
-  remote "curl -fsSLo ~/vault-headless-setup.sh $RAW/setup.sh && bash ~/vault-headless-setup.sh $REF doctor"
+if [ "$MODE" != "setup" ]; then
+  if [ "$MODE" = "doctor" ]; then
+    echo "常時機の様子を見て、様子を GitHub に上げる仕組みを入れます（ログインは要りません）。"
+  else
+    echo "常時機に議事録の周回を入れます（5分ほど・ログインは要りません）。"
+  fi
+  remote "curl -fsSLo ~/vault-headless-setup.sh $RAW/setup.sh && bash ~/vault-headless-setup.sh $REF $MODE"
   exit 0
 fi
 

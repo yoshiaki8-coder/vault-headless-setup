@@ -11,6 +11,8 @@
 #   bash setup.sh <コミット> finish  … Obsidian にログインし、常駐を入れる。初めの写しは裏で取る
 #   bash setup.sh <コミット> doctor  … 様子を GitHub の headless-status ブランチへ上げる仕組みを入れ、
 #                                      止まった初めの写しを動かし直す（ログインは要らない）
+#   bash setup.sh <コミット> minutes … 議事録の周回（PLAUD の取り込みと議事録づくり・10分おき）を入れる。
+#                                      書くのは旗 minutes が cloud のときだけ（ログインは要らない）
 #
 # このスクリプトに鍵は入っていない。鍵とパスワードは本人がこの画面に打つか、機械の上で作る:
 #   - Obsidian のログイン（メール・パスワード・2段階）と暗号化のパスワード → ob が機械の上に保存
@@ -37,6 +39,10 @@ REPO_SSH="git@github.com:yoshiaki8-coder/my-obsidian-vault.git"
 SYNC_VAULT="${SYNC_VAULT:-yoshi88_main}"
 DEVICE_NAME="${DEVICE_NAME:-headless-gcp}"
 FILE_TYPES="image,audio,video,pdf,unsupported"
+PLAUD_VERSION=0.3.15
+# 議事録づくりの Python の部品（Debian 12 の Python 3.11 で、この版のテストが通るのを確かめた・2026-10-27）
+MINUTES_PIP="google-genai==2.33.0 python-docx==1.2.0 pdfplumber==0.11.10 requests==2.34.2
+  google-api-python-client==2.201.0 google-auth==2.62.0 google-auth-oauthlib==1.5.0 google-auth-httplib2==0.4.4"
 
 step() { printf '\n【%s】%s\n' "$1" "$2"; }
 as_svc() { sudo -u "$SVC_USER" -H "$@"; }
@@ -83,12 +89,104 @@ EOF
   sudo systemctl daemon-reload
 }
 
+# 議事録の周回（2026-10-27）。常時機で PLAUD の取り込みと議事録づくりを回し、結果を main へ上げる。
+# 入れるだけで、書くのは旗 minutes が cloud のときだけ。鍵は Mac の「常時機へ議事録の鍵を送る.command」が
+# この機械の age の公開鍵で包んで送り、周回が受け取る（鍵をこの画面に打ったり貼ったりはしない）
+install_minutes() {
+  step 1/4 "部品（Python の venv・age・PLAUD の CLI $PLAUD_VERSION）"
+  sudo apt-get update -q
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3-venv age
+  sudo /opt/node/bin/npm install -g --no-fund --no-audit "@plaud-ai/cli@$PLAUD_VERSION"
+  test -x /opt/node/bin/plaud
+
+  step 2/4 "議事録づくりの Python（版を固定）"
+  sudo test -x "$SVC_HOME/minutes-venv/bin/python" || as_svc python3 -m venv "$SVC_HOME/minutes-venv"
+  # shellcheck disable=SC2086 # 版の並びをそのまま pip に渡す
+  as_svc "$SVC_HOME/minutes-venv/bin/pip" install -q --disable-pip-version-check $MINUTES_PIP
+
+  step 3/4 "鍵の受け取り口（age の鍵をこの機械の上で作る・秘密の鍵は機械から出ない）"
+  as_svc install -d -m 700 "$SVC_HOME/.config/headless"
+  # 有無は sudo で見る（vaultsync の家は流している人の権限では覗けない）
+  if ! sudo test -f "$SVC_HOME/.config/headless/age.key"; then
+    as_svc age-keygen -o "$SVC_HOME/.config/headless/age.key" 2>/dev/null
+  fi
+  as_svc chmod 600 "$SVC_HOME/.config/headless/age.key"
+  echo "受け取り口: $(sudo age-keygen -y "$SVC_HOME/.config/headless/age.key")"
+
+  step 4/4 "10分おきの周回（初めの写しは周回が裏で取る）"
+  sudo tee /usr/local/sbin/vault-minutes-cycle >/dev/null <<EOF
+#!/bin/bash
+# 議事録の周回の入口（vault-minutes.timer が $SVC_USER で10分おきに呼ぶ）。正本は setup.sh の minutes の段。
+# 作業用の写しを main に合わせてから、写しの中の minutes_cycle.sh を流す（周回の中身は main が正本）。
+set -uo pipefail
+CO="\$HOME/minutes-git"
+if [ ! -d "\$CO/.git" ]; then
+  # 初めの写し（2GB ほど）。取り切ってから置き換えるので、途中で止まっても半端な写しは残らない
+  rm -rf "\$CO.tmp"
+  git clone -q --filter=blob:none --single-branch --branch main $REPO_SSH "\$CO.tmp" \\
+    || { echo "写しを取れませんでした。次の周回でもう一度"; rm -rf "\$CO.tmp"; exit 75; }
+  git -C "\$CO.tmp" config core.hooksPath .githooks
+  mv "\$CO.tmp" "\$CO"
+fi
+git -C "\$CO" pull -q --rebase --autostash origin main \\
+  || { git -C "\$CO" rebase --abort 2>/dev/null; echo "main に合わせられませんでした。次の周回でもう一度"; exit 75; }
+cycle="\$CO/90_Automation（自動化スクリプト）/cloud/headless/minutes_cycle.sh"
+[ -f "\$cycle" ] || { echo "main にまだ周回の中身（minutes_cycle.sh）がありません"; exit 0; }
+exec /bin/bash "\$cycle"
+EOF
+  sudo chmod 755 /usr/local/sbin/vault-minutes-cycle
+  sudo tee /etc/systemd/system/vault-minutes.service >/dev/null <<EOF
+[Unit]
+Description=常時機の議事録の周回（PLAUD の取り込みと議事録づくり）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=$SVC_USER
+Environment=HOME=$SVC_HOME
+Environment=PATH=/opt/node/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash /usr/local/sbin/vault-minutes-cycle
+# 75 は「今は無理・次の周回でよい」。初めの写しと長い録音の議事録づくりに時間がかかる
+SuccessExitStatus=75
+TimeoutStartSec=90min
+Nice=10
+EOF
+  sudo tee /etc/systemd/system/vault-minutes.timer >/dev/null <<EOF
+[Unit]
+Description=10分おきに議事録の周回を回す
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
+EOF
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now vault-minutes.timer
+}
+
 case "$PHASE" in
   pubkey) sudo cat "$SVC_HOME/.ssh/vault_deploy.pub"; exit 0 ;;
   keyok) key_ok; exit $? ;;
-  prepare|finish|doctor) ;;
-  *) echo "段階は prepare・pubkey・keyok・finish・doctor のどれか: $PHASE" >&2; exit 1 ;;
+  prepare|finish|doctor|minutes) ;;
+  *) echo "段階は prepare・pubkey・keyok・finish・doctor・minutes のどれか: $PHASE" >&2; exit 1 ;;
 esac
+
+if [ "$PHASE" = "minutes" ]; then
+install_minutes
+echo
+install_status
+sudo env FORCE_PUSH=1 bash /usr/local/sbin/vault-headless-status \
+  && echo "様子（受け取り口の公開鍵を含む）を my-obsidian-vault の headless-status ブランチへ上げました。" \
+  || echo "様子を GitHub に上げられませんでした。下の画面をそのまま送ってください。"
+sudo systemctl enable --now vault-headless-status.timer
+echo
+echo "終わりました。この画面は閉じてかまいません。"
+echo "初めの写し（2GB ほど）は周回が裏で取ります。旗 minutes が mac のあいだは、鍵の有無を見て休みます。"
+exit 0
+fi
 
 if [ "$PHASE" = "doctor" ]; then
 
