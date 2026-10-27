@@ -24,6 +24,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headle
 bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/<コミット>/cloudshell.sh) <コミット> minutes
 ```
 
+一方通行の橋（非公開リポの main で変わった Markdown を Obsidian Sync へ流す）を始めるなら、最後に `bridge` を付ける（ログインは要らない）。Sync の写しを「読むだけ」から「書ける」に替える。流すのは議事録の周回の終わりに回る非公開リポ側のスクリプトで、Sync で直されたものには触らない。
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/yoshiaki8-coder/vault-headless-setup/<コミット>/cloudshell.sh) <コミット> bridge
+```
+
 コミットで固定した URL から取るので、あとからこのリポを変えても、流す中身は変わらない。
 
 ## 何をするか

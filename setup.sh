@@ -13,6 +13,8 @@
 #                                      止まった初めの写しを動かし直す（ログインは要らない）
 #   bash setup.sh <コミット> minutes … 議事録の周回（PLAUD の取り込みと議事録づくり・10分おき）を入れる。
 #                                      書くのは旗 minutes が cloud のときだけ（ログインは要らない）
+#   bash setup.sh <コミット> bridge  … 一方通行の橋（GitHub で変わった Markdown を Sync へ流す）のために、
+#                                      Sync の写しを「読むだけ」から「書ける」に替える（ログインは要らない）
 #
 # このスクリプトに鍵は入っていない。鍵とパスワードは本人がこの画面に打つか、機械の上で作る:
 #   - Obsidian のログイン（メール・パスワード・2段階）と暗号化のパスワード → ob が機械の上に保存
@@ -170,9 +172,33 @@ EOF
 case "$PHASE" in
   pubkey) sudo cat "$SVC_HOME/.ssh/vault_deploy.pub"; exit 0 ;;
   keyok) key_ok; exit $? ;;
-  prepare|finish|doctor|minutes) ;;
-  *) echo "段階は prepare・pubkey・keyok・finish・doctor・minutes のどれか: $PHASE" >&2; exit 1 ;;
+  prepare|finish|doctor|minutes|bridge) ;;
+  *) echo "段階は prepare・pubkey・keyok・finish・doctor・minutes・bridge のどれか: $PHASE" >&2; exit 1 ;;
 esac
+
+# 一方通行の橋（2026-10-27）。本人は iPhone の Obsidian で読むだけなので、橋は GitHub → Sync の向きだけ。
+# Sync に書くのは議事録の周回の終わりに回る git_to_sync.py だけで、運ぶのは main で変わった Markdown だけ
+# （Sync で直されたものは触らない）。ここでは Sync の写しを「書ける」に替えて、常駐を入れ直すだけ。
+# 運ぶ種類の設定（file-types）は替えない。常時機は Markdown 以外を自分で書き換えないので、上がることはない
+if [ "$PHASE" = "bridge" ]; then
+step 1/2 "Sync の写しを「書ける」に替える（GitHub で変わった Markdown だけを流す）"
+sudo test -f "$SVC_HOME/.local/state/headless/linked" || { echo "Sync への結び付けがまだです。設定の1行を先に流してください。" >&2; exit 1; }
+systemctl is-enabled --quiet vault-minutes.timer 2>/dev/null || { echo "議事録の周回がまだ入っていません。minutes の1行を先に流してください。" >&2; exit 1; }
+as_svc ob sync-config --path "$SVC_HOME/vault-sync" --mode bidirectional
+sudo systemctl restart vault-headless-sync.service
+as_svc ob sync-status --path "$SVC_HOME/vault-sync" | grep -i "mode" || true
+
+step 2/2 "様子を GitHub に上げる"
+install_status
+sudo env FORCE_PUSH=1 bash /usr/local/sbin/vault-headless-status \
+  && echo "様子を my-obsidian-vault の headless-status ブランチへ上げました。" \
+  || echo "様子を GitHub に上げられませんでした。下の画面をそのまま送ってください。"
+echo
+echo "終わりました。この画面は閉じてかまいません。"
+echo "次の議事録の周回（10分以内）から、GitHub で変わった Markdown が Sync へ流れます。"
+echo "止めるとき: 旗 git_to_sync を mac にする PR をマージする（流すのが止まる。Sync の写しは「書ける」のままでも、常時機は何も書き換えない）。"
+exit 0
+fi
 
 if [ "$PHASE" = "minutes" ]; then
 install_minutes

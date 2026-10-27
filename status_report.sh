@@ -56,6 +56,7 @@ minutes_section() {
   echo "- 最後の周回: $(cat "$MIN_STATE/minutes_last.txt" 2>/dev/null || echo まだ)"
   echo "- 鍵の受け取り: $(cat "$MIN_STATE/keys_received.txt" 2>/dev/null || echo まだ)"
   echo "- 置いてある鍵（名前だけ）: $(minutes_keys)"
+  echo "- 一方通行の橋（GitHub → Sync・旗 git_to_sync）: $(cat "$MIN_STATE/git_to_sync_last.txt" 2>/dev/null || echo まだ)"
   # Mac の「常時機へ議事録の鍵を送る.command」がこの行から公開鍵を読む
   echo "- 鍵の受け取り口: $(age-keygen -y "$AGE_KEY" 2>/dev/null || echo まだ)"
 }

@@ -3,7 +3,7 @@
 公開の写しあり（yoshiaki8-coder/vault-headless-setup）。写しは編集禁止・正本はこのファイル。
 設計は docs/Obsidian_Headless_git橋_設計_2026-10-19.md。
 
-読むだけ。Sync の写し（ob sync の pull-only）にも main にも書かない。
+読むだけ。Sync の写しにも main にも書かない（Sync の写しへ書くのは一方通行の橋 git_to_sync.py だけ）。
 突き合わせの結果は --out に report.json と report.md を書くだけで、上げるのは run_shadow.sh。
 
 比べ方:
