@@ -130,8 +130,18 @@ if [ ! -d "\$CO/.git" ]; then
   git -C "\$CO.tmp" config core.hooksPath .githooks
   mv "\$CO.tmp" "\$CO"
 fi
-git -C "\$CO" pull -q --rebase --autostash origin main \\
-  || { git -C "\$CO" rebase --abort 2>/dev/null; echo "main に合わせられませんでした。次の周回でもう一度"; exit 75; }
+# 上げ損ねた周回の分を main の上に載せ直すには、記録者の名前が要る（$SVC_USER には名前が無い。
+# 無いと載せ直しが毎回断られ、周回が止まったままになる・2026-10-28 12:01〜）
+git -C "\$CO" config user.name yoshi88-headless
+git -C "\$CO" config user.email yoshi88-headless@users.noreply.github.com
+# ぶつかったら常時機の方を残す（載せ直すのは常時機が書き手の台帳と議事録だけ）
+git -C "\$CO" pull -q --rebase --autostash -X theirs origin main \\
+  || { git -C "\$CO" rebase --abort 2>/dev/null
+       # 様子の記録（headless-status）に出るように、周回の最後の一言の置き場へ書く
+       mkdir -p "\$HOME/.local/state/headless"
+       printf '%s %s\n' "\$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')" "main に合わせられませんでした。次の周回でもう一度" \\
+         | tee "\$HOME/.local/state/headless/minutes_last.txt"
+       exit 75; }
 cycle="\$CO/90_Automation（自動化スクリプト）/cloud/headless/minutes_cycle.sh"
 [ -f "\$cycle" ] || { echo "main にまだ周回の中身（minutes_cycle.sh）がありません"; exit 0; }
 exec /bin/bash "\$cycle"
